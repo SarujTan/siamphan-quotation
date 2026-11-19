@@ -107,6 +107,9 @@
   .total-row .total-lbl { text-align: right; font-weight: normal; }
   .total-row .total-val { text-align: right; padding-right: 6px; border-bottom: 3px double var(--line); font-weight: bold; }
 
+  /* where a new printed page starts (every ITEMS_PER_PAGE items) */
+  table.items tr.page-start td.cell { border-top: 2px dashed #7a9be0; }
+
   .row-del {
     position: absolute; right: -9mm; width: 7mm; height: 7mm; border: 0; border-radius: 50%;
     background: transparent; color: #c9ced6; font-size: 16px; cursor: pointer; line-height: 1;
@@ -209,6 +212,12 @@
     .to input#fAttn, .to input#fCompany { display: none; }
     .print-val { display: block; }
     tr { break-inside: avoid; }
+    table.items tr.page-start { break-before: page; }
+    table.items tr.page-start td.cell { border-top: 1px solid var(--line); }
+    .notes { break-before: avoid; }
+    /* a little tighter than on screen so 15 single-line items, notes and signature fit on one page */
+    .notes { margin-top: 6mm; }
+    .sign { margin-top: 3mm; }
     .notes, .closing, .sign { break-inside: avoid; }
   }
 </style>
@@ -406,6 +415,8 @@ const MIN_ROWS = 10;
 // characters; longer codes wrap onto the next line (CODE_MAX_PCT is only a safety cap)
 const CODE_MIN_PCT = 14, CODE_MAX_PCT = 30, CODE_DESC_PCT = 58;   // code + description share 58% of the table
 const CODE_LINE_CHARS = 18;
+// printing: at most this many items on a page; the next item starts a new page
+const ITEMS_PER_PAGE = 15;
 const CODE_CELL_PAD = 15;   // td padding 4+4, textarea padding 2+2, border 1, plus rounding of the textarea width
 const TH_MONTHS = ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
   'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'];
@@ -923,6 +934,7 @@ function recalc() {
     const d = data[k];
     const seqCell = tr.querySelector('.c-no');
     seqCell.textContent = k <= last ? ++seq : '';
+    tr.classList.toggle('page-start', k > 0 && k <= last && k % ITEMS_PER_PAGE === 0);
     const sumCell = tr.querySelector('.c-sum');
     const del = sumCell.querySelector('.row-del');
     sumCell.textContent = '';
@@ -1356,9 +1368,11 @@ async function preparePdfFolder(iso) {
 
 // "หน้า 1/2" only when the quotation runs over one A4 page (269mm of content inside the page margins)
 const PRINT_AREA_MM = 297 - 2 * 14;
+const PRINT_TIGHTER_MM = (10 - 6) + (6 - 3);   // print CSS shrinks .notes / .sign top margins
 function updatePageNumbers() {
   const px = document.querySelector('table.doc').offsetHeight - $('btnAddRow').offsetHeight;
-  $('pageNumbers').disabled = px * 25.4 / 96 <= PRINT_AREA_MM;
+  const printedMm = px * 25.4 / 96 - PRINT_TIGHTER_MM;
+  $('pageNumbers').disabled = printedMm <= PRINT_AREA_MM && !document.querySelector('#itemsBody tr.page-start');
 }
 window.addEventListener('beforeprint', () => { syncPrintHeader(); updatePageNumbers(); });
 
