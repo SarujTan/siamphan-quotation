@@ -402,8 +402,11 @@ const DEFAULTS = {
 const CASH = 'เงินสด';
 const isCash = (v) => String(v ?? '').replace(/\s+/g, '').includes(CASH);
 const MIN_ROWS = 10;
-// product code column: grows with the longest code in the quotation, up to CODE_MAX_PCT; longer codes wrap
-const CODE_MIN_PCT = 14, CODE_MAX_PCT = 25, CODE_DESC_PCT = 58;   // code + description share 58% of the table
+// product code column: grows with the longest code in the quotation until one line holds CODE_LINE_CHARS
+// characters; longer codes wrap onto the next line (CODE_MAX_PCT is only a safety cap)
+const CODE_MIN_PCT = 14, CODE_MAX_PCT = 30, CODE_DESC_PCT = 58;   // code + description share 58% of the table
+const CODE_LINE_CHARS = 18;
+const CODE_CELL_PAD = 15;   // td padding 4+4, textarea padding 2+2, border 1, plus rounding of the textarea width
 const TH_MONTHS = ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
   'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'];
 
@@ -871,11 +874,18 @@ function fitCodeColumn() {
   const th = document.querySelector('th.c-code');
   const tableW = th.closest('table').clientWidth;
   if (!tableW) return;
-  const longest = Math.max(0, ...codes.map((c) => textWidth(c.value.trim(), c)));
-  const pct = Math.min(CODE_MAX_PCT, Math.max(CODE_MIN_PCT, Math.ceil((longest + 16) / tableW * 100)));
+  // widest run of CODE_LINE_CHARS characters among all codes
+  const chunkWidth = (c) => {
+    const v = [...c.value.trim()];
+    let w = 0;
+    for (let k = 0; k < v.length; k += CODE_LINE_CHARS) w = Math.max(w, textWidth(v.slice(k, k + CODE_LINE_CHARS).join(''), c));
+    return w;
+  };
+  const longest = Math.max(0, ...codes.map(chunkWidth));
+  const pct = +Math.min(CODE_MAX_PCT, Math.max(CODE_MIN_PCT, Math.ceil(longest + CODE_CELL_PAD) / tableW * 100)).toFixed(2);
   if (th.style.width === pct + '%') return;
   th.style.width = pct + '%';
-  document.querySelector('th.c-desc').style.width = (CODE_DESC_PCT - pct) + '%';
+  document.querySelector('th.c-desc').style.width = +(CODE_DESC_PCT - pct).toFixed(2) + '%';
   $('itemsBody').querySelectorAll('textarea').forEach(autoGrow);
 }
 
@@ -1355,7 +1365,7 @@ window.addEventListener('beforeprint', () => { syncPrintHeader(); updatePageNumb
 // ===================== program version / update / roll back =====================
 // An update replaces only program files (quotation.html, lib/*.js) in the connected folder;
 // the previous quotation.html is kept in backup/โปรแกรม/ so it can be restored.
-const APP_VERSION = '1.2.0';
+const APP_VERSION = '1.2.1';
 const UPDATE_BASE = 'https://raw.githubusercontent.com/SarujTan/siamphan-quotation/main/';
 const PROG_BACKUP_DIR = 'โปรแกรม';
 const UPDATABLE = /^(quotation\.html|lib\/[\w.-]+\.js)$/;   // an update may never touch data files
