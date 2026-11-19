@@ -1,0 +1,1681 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<title>ใบเสนอราคา - สยามภัณฑ์กรุงเทพ</title>
+<script src="lib/xlsx.full.min.js"></script>
+<style>
+  :root {
+    --ink: #000;
+    --muted: #8a8f98;
+    --line: #000;
+    --ui-bg: #e9ebef;
+    --ui-bar: #1f2a44;
+    --ui-accent: #2f6fde;
+    --ui-danger: #c0392b;
+    --doc-font: "AngsanaUPC", "Angsana New", "TH Sarabun New", "Sarabun", Tahoma, sans-serif;
+    --ui-font: "Segoe UI", Tahoma, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--ui-bg); font-family: var(--ui-font); }
+
+  /* ---------- toolbar ---------- */
+  .toolbar {
+    position: sticky; top: 0; z-index: 10;
+    display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+    padding: 10px 16px; background: var(--ui-bar); color: #fff;
+  }
+  .toolbar button {
+    font: 14px var(--ui-font); padding: 7px 14px; border: 0; border-radius: 6px;
+    background: #34405e; color: #fff; cursor: pointer;
+  }
+  .toolbar button:hover { background: #45527a; }
+  .toolbar button.primary { background: var(--ui-accent); }
+  .toolbar button.primary:hover { background: #2a5fc0; }
+  .toolbar .sep { width: 1px; height: 24px; background: #4a5578; margin: 0 4px; }
+  .toolbar .spacer { flex: 1; }
+  .folder-status { font-size: 13px; opacity: .85; }
+  .folder-status.off { color: #ffb4a8; opacity: 1; }
+  .doc-state { font-size: 13px; padding: 3px 10px; border-radius: 12px; background: #34405e; }
+  .doc-state.dirty { background: #8a5a00; }
+  .doc-state.cancelled { background: var(--ui-danger); }
+
+  /* ---------- A4 sheet ---------- */
+  .sheet {
+    width: 210mm; min-height: 297mm; margin: 20px auto 40px; padding: 14mm 17mm 14mm 17mm;
+    background: #fff; box-shadow: 0 2px 12px rgba(0,0,0,.18);
+    font-family: var(--doc-font); font-size: 14pt; font-weight: bold; color: var(--ink);
+    line-height: 1.25; position: relative;
+  }
+  .sheet input, .sheet textarea {
+    font: inherit; color: inherit; border: 0; background: transparent; padding: 0 2px; margin: 0;
+    outline: none; border-radius: 2px;
+  }
+  /* Thai stacked marks (e.g. มิ้ง, ญี่ปุ่น) rise above the line box and get clipped by the field,
+     so give fields extra room on top and pull them back with a negative margin to keep line spacing */
+  .sheet input { line-height: 1.75; margin: -.25em 0; }
+  .sheet textarea { padding-top: .4em; margin-top: -.4em; }
+  .sheet input, .sheet textarea { background-clip: content-box; }
+  .sheet input:hover, .sheet textarea:hover { background: #f3f7ff; }
+  .sheet input:focus, .sheet textarea:focus { background: #e6efff; }
+  .sheet ::placeholder { color: #b9c0cc; font-weight: normal; }
+
+  .company div { margin: 0; }
+  .company .tel { font-size: 13pt; }
+  .title { text-align: center; font-size: 16pt; margin: 8px 0 10px; }
+
+  .meta { display: flex; justify-content: flex-end; }
+  .meta table { border-collapse: collapse; }
+  .meta td { padding: 1px 4px; }
+  .meta .lbl { font-weight: normal; }
+  .meta .no { font-weight: bold; min-width: 45mm; }
+  .no.pending { color: var(--muted); font-weight: normal; font-size: 12pt; }
+  .date-wrap { position: relative; cursor: pointer; }
+  .date-wrap input[type=date] { position: absolute; inset: 0; opacity: 0; width: 100%; cursor: pointer; }
+
+  .to { display: grid; grid-template-columns: 17mm 1fr; row-gap: 1px; margin: 6px 0 0 8mm; }
+  .to.intro { margin: 1px 0 8px 8mm; }
+  .to input { width: 100%; }
+  /* printed copy of เรียน / บริษัท: Chrome leaves input values blank in the header repeated on page 2+ */
+  .print-val { display: none; min-height: 1.25em; padding: 0 2px; }
+
+  /* the header block is the table head, so the browser repeats it on every printed page */
+  table.doc { width: 100%; border-collapse: collapse; }
+  table.doc > thead > tr > td, table.doc > tbody > tr > td { padding: 0; }
+
+  /* ---------- items table ---------- */
+  .items-wrap { position: relative; }
+  table.items { width: 100%; border-collapse: collapse; table-layout: fixed; }
+  table.items th, table.items td.cell { border: 1px solid var(--line); padding: 0 4px; vertical-align: top; }
+  table.items th { text-align: center; padding: 1px 4px; }
+  table.items td.cell { font-weight: normal; height: 7.4mm; }
+  table.items td input, table.items td textarea { width: 100%; }
+  table.items textarea { resize: none; overflow: hidden; display: block; height: 1.25em; line-height: 1.25; }
+  table.items textarea[data-k=code] { overflow-wrap: anywhere; }
+  .c-no { width: 7%; text-align: center; }
+  .c-code { width: 14%; }
+  .c-desc { width: 44%; }
+  .c-qty { width: 9%; }
+  .c-price { width: 13%; }
+  .c-sum { width: 13%; }
+  td.c-no, td.c-qty input { text-align: center; }
+  td.c-price input, td.c-sum { text-align: right; }
+  td.c-sum { padding-right: 6px !important; }
+  /* Total is a body row, not tfoot: a tfoot would be repeated on every printed page */
+  .total-row td { border: 0; padding: 3px 4px; }
+  .total-row { break-before: avoid; }
+  .total-row .total-lbl { text-align: right; font-weight: normal; }
+  .total-row .total-val { text-align: right; padding-right: 6px; border-bottom: 3px double var(--line); font-weight: bold; }
+
+  .row-del {
+    position: absolute; right: -9mm; width: 7mm; height: 7mm; border: 0; border-radius: 50%;
+    background: transparent; color: #c9ced6; font-size: 16px; cursor: pointer; line-height: 1;
+  }
+  .row-del:hover { background: #fde8e6; color: var(--ui-danger); }
+  .add-row {
+    margin-top: 4px; font: 13px var(--ui-font); color: var(--ui-accent); background: none;
+    border: 1px dashed #b7c6e6; border-radius: 4px; padding: 3px 10px; cursor: pointer;
+  }
+  .add-row:hover { background: #f0f5ff; }
+
+  .notes { display: grid; grid-template-columns: 17mm 1fr; margin: 10mm 0 0 8mm; row-gap: 1px; }
+  .notes .n-in { width: 9mm; text-align: center; }
+  .notes .n-text { width: 120mm; }
+  .notes select { font: inherit; color: inherit; border: 0; background: transparent; padding: 0 2px; margin: 0;
+    appearance: none; cursor: pointer; border-radius: 2px; outline: none; }
+  .notes select:hover { background: #f3f7ff; }
+  .notes select:focus { background: #e6efff; }
+  .pay-caret { color: #b9c0cc; font-size: 10pt; cursor: pointer; }
+  .closing { margin: 5mm 0 0 25mm; }
+  .sign { width: 70mm; margin: 6mm 0 0 auto; text-align: center; }
+  .sign img { height: 15mm; display: block; margin: 0 auto 1mm; }
+
+  /* ---------- modal ---------- */
+  .modal-bg { position: fixed; inset: 0; background: rgba(15,20,35,.45); display: none; z-index: 50;
+    align-items: flex-start; justify-content: center; padding-top: 7vh; }
+  .modal-bg.show { display: flex; }
+  .modal { background: #fff; border-radius: 10px; width: min(860px, 94vw); max-height: 80vh;
+    display: flex; flex-direction: column; box-shadow: 0 10px 40px rgba(0,0,0,.3); font-size: 14px; }
+  .modal h3 { margin: 0; padding: 14px 18px; border-bottom: 1px solid #e3e6eb; font-size: 16px; }
+  .modal .body { padding: 14px 18px; overflow: auto; }
+  .modal .foot { padding: 12px 18px; border-top: 1px solid #e3e6eb; display: flex; justify-content: flex-end; gap: 8px; }
+  .modal button { font: 14px var(--ui-font); padding: 7px 14px; border-radius: 6px; border: 1px solid #cfd5df; background: #fff; cursor: pointer; }
+  .modal button.primary { background: var(--ui-accent); border-color: var(--ui-accent); color: #fff; }
+  .modal input[type=search] { width: 100%; padding: 8px 10px; font-size: 14px; border: 1px solid #cfd5df; border-radius: 6px; margin-bottom: 10px; }
+  .list { width: 100%; border-collapse: collapse; }
+  .list th { text-align: left; font-weight: 600; color: #555; border-bottom: 1px solid #e3e6eb; padding: 6px 8px; position: sticky; top: 0; background: #fff; }
+  .list td { padding: 7px 8px; border-bottom: 1px solid #f0f1f4; }
+  .list tr.r:hover td { background: #f0f5ff; cursor: pointer; }
+  .list .num { text-align: right; font-variant-numeric: tabular-nums; }
+  .list .rev { font-size: 12px; color: #8a5a00; background: #fff4dc; padding: 1px 6px; border-radius: 8px; margin-left: 4px; }
+  .empty { color: #888; text-align: center; padding: 30px; }
+  .older-years { display: flex; align-items: center; gap: 10px; margin: -4px 0 8px; color: #777; font-size: 13px; }
+  .older-years:empty { display: none; }
+  .older-years button { font-size: 13px; padding: 4px 10px; }
+  .list tr.cancelled td { color: #9aa0a8; }
+  .list tr.cancelled td:first-child { text-decoration: line-through; }
+  .badge-cancel { font-size: 12px; color: #fff; background: var(--ui-danger); padding: 1px 6px; border-radius: 8px; margin-left: 4px; text-decoration: none; display: inline-block; }
+  .list td.acts { white-space: nowrap; text-align: right; width: 1%; }
+  .list button.act { font-size: 12px; padding: 3px 8px; margin-left: 4px; border-radius: 5px; border: 1px solid #cfd5df; background: #fff; color: #444; }
+  .list button.act.cancel:hover { border-color: #d49b00; background: #fff6df; }
+  .list button.act.restore:hover { border-color: var(--ui-accent); background: #f0f5ff; }
+  .list button.act.del { color: var(--ui-danger); }
+  .list button.act.del:hover { border-color: var(--ui-danger); background: #fde8e6; }
+  .modal button.danger { background: var(--ui-danger); border-color: var(--ui-danger); color: #fff; }
+
+  /* cancelled stamp, shown on screen and in print */
+  .stamp { display: none; position: absolute; top: 60mm; left: 50%; transform: translateX(-50%) rotate(-18deg);
+    border: 4px solid var(--ui-danger); color: var(--ui-danger); font-family: var(--doc-font); font-size: 54pt;
+    font-weight: bold; padding: 0 12mm; border-radius: 6px; opacity: .55; pointer-events: none; letter-spacing: 4px; }
+  .stamp small { display: block; font-size: 14pt; text-align: center; letter-spacing: 0; line-height: 1.2; padding-bottom: 2mm; }
+  .sheet.is-cancelled .stamp { display: block; }
+  .opt { display: block; padding: 10px 12px; border: 1px solid #e3e6eb; border-radius: 8px; margin-bottom: 8px; cursor: pointer; }
+  .opt:has(input:checked) { border-color: var(--ui-accent); background: #f0f5ff; }
+  .opt small { display: block; color: #666; margin: 2px 0 0 22px; }
+  .modal textarea { width: 100%; font: 14px var(--ui-font); padding: 8px; border: 1px solid #cfd5df; border-radius: 6px; }
+
+  .sg-star { width: 14px; flex: none; color: #d4a000; }
+  .sg-price small { color: #999; font-size: 11px; }
+  .suggest { position: absolute; display: none; z-index: 40; width: 175mm; max-height: 70vh; overflow: auto;
+    background: #fff; border: 1px solid #cfd5df; border-radius: 6px; box-shadow: 0 6px 20px rgba(0,0,0,.18); font-size: 14px; }
+  .sg-item { display: flex; gap: 10px; padding: 6px 10px; cursor: pointer; border-bottom: 1px solid #f0f1f4; }
+  .sg-item:last-child { border-bottom: 0; }
+  .sg-item:hover, .sg-item.active { background: #e6efff; }
+  .sg-code { width: 80px; flex: none; color: #555; }
+  .sg-desc { flex: 1; }
+  .sg-price { width: 105px; flex: none; white-space: nowrap; text-align: right; color: #555; font-variant-numeric: tabular-nums; }
+
+  .toast { position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%); background: #1f2a44; color: #fff;
+    padding: 10px 18px; border-radius: 8px; font-size: 14px; opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 60; max-width: 90vw; }
+  .toast.show { opacity: 1; }
+  .toast.err { background: var(--ui-danger); }
+
+  .toolbar button.ver { font-size: 12px; padding: 4px 9px; background: transparent; border: 1px solid #4a5578; opacity: .85; }
+  .toolbar button.ver.has-update { background: #1e8e5a; border-color: #1e8e5a; opacity: 1; }
+  .ver-box { padding: 10px 12px; border: 1px solid #e3e6eb; border-radius: 8px; margin: 8px 0 12px; }
+  .ver-box.new { border-color: #1e8e5a; background: #effaf4; }
+  .ver-box .notes-text { white-space: pre-line; color: #444; margin: 6px 0 10px; }
+  .modal h4 { margin: 16px 0 6px; font-size: 14px; }
+
+  /* ---------- print ---------- */
+  @page { size: A4; margin: 14mm 17mm; }
+  @media print {
+    body { background: #fff; }
+    .no-print, .toolbar, .row-del, .add-row, .modal-bg, .toast { display: none !important; }
+    .sheet { margin: 0; padding: 0; width: auto; min-height: 0; box-shadow: none; }
+    .sheet input, .sheet textarea { background: transparent !important; }
+    .sheet ::placeholder { color: transparent; }
+    .no.pending { visibility: hidden; }
+    .to input#fAttn, .to input#fCompany { display: none; }
+    .print-val { display: block; }
+    tr { break-inside: avoid; }
+    .notes, .closing, .sign { break-inside: avoid; }
+  }
+</style>
+<!-- page numbers, switched on just before printing when the quotation runs over one page -->
+<style id="pageNumbers" media="print">
+  @page { @bottom-right { content: "หน้า " counter(page) "/" counter(pages);
+    font-family: "AngsanaUPC", "Angsana New", "TH Sarabun New", sans-serif; font-size: 13pt; } }
+</style>
+</head>
+<body>
+
+<div class="toolbar no-print">
+  <button id="btnNew">ใบใหม่</button>
+  <button id="btnOpen">เปิดใบเก่า</button>
+  <button id="btnCopy">คัดลอกเป็นใบใหม่</button>
+  <div class="sep"></div>
+  <button id="btnSave" class="primary">บันทึก</button>
+  <button id="btnPrint">พิมพ์ / PDF</button>
+  <span id="docState" class="doc-state">ใบใหม่</span>
+  <div class="spacer"></div>
+  <span id="folderStatus" class="folder-status off">ยังไม่ได้เชื่อมต่อ folder</span>
+  <button id="btnFolder">เชื่อมต่อ folder</button>
+  <button id="btnVersion" class="ver" title="เวอร์ชันโปรแกรม / อัปเดต"></button>
+</div>
+
+<div class="sheet" id="sheet">
+  <div class="stamp" id="stamp">ยกเลิก<small id="stampNote"></small></div>
+  <table class="doc">
+  <thead><tr><td>
+  <div class="company">
+    <div>บริษัท สยามภัณฑ์กรุงเทพ จำกัด</div>
+    <div>10/2-3 ถ.อัษฎางค์ แขวงศาลเจ้าพ่อเสือ</div>
+    <div>เขตพระนคร กรุงเทพฯ 10200</div>
+    <div class="tel">โทร. 02-2241625 , 02-2231767-8 แฟ็กซ์ 02-2263881</div>
+  </div>
+
+  <div class="title">ใบเสนอราคา</div>
+
+  <div class="meta">
+    <table>
+      <tr><td class="lbl">เลขที่</td><td><span id="fNo" class="no pending">(ออกเลขอัตโนมัติเมื่อบันทึก)</span></td></tr>
+      <tr><td>วันที่</td><td><span class="date-wrap"><span id="fDateText"></span><input type="date" id="fDate"></span></td></tr>
+    </table>
+  </div>
+
+  <div class="to">
+    <div>เรียน</div><div><input id="fAttn" list="dlAttn" placeholder="ชื่อผู้ติดต่อ เช่น คุณชุติมันต์ บุญประคอง"><span class="print-val" id="pAttn"></span></div>
+    <div></div><div><input id="fCompany" list="dlCompany" placeholder="ชื่อบริษัทลูกค้า"><span class="print-val" id="pCompany"></span></div>
+  </div>
+  </td></tr></thead>
+  <tbody><tr><td>
+  <div class="to intro"><div></div><div><input id="fIntro"></div></div>
+
+  <div class="items-wrap">
+    <table class="items">
+      <thead>
+        <tr><th class="c-no">ลำดับ</th><th class="c-code">รหัสสินค้า</th><th class="c-desc">รายละเอียด</th><th class="c-qty">จำนวน</th><th class="c-price">ราคา/หน่วย</th><th class="c-sum">รวม</th></tr>
+      </thead>
+      <tbody id="itemsBody"></tbody>
+      <tbody>
+        <tr class="total-row"><td colspan="4"></td><td class="total-lbl">Total</td><td class="total-val" id="fTotal">0.00</td></tr>
+      </tbody>
+    </table>
+    <button class="add-row" id="btnAddRow">+ เพิ่มแถว</button>
+  </div>
+
+  <div class="notes">
+    <div>หมายเหตุ</div><div>1. <input id="fNote1" class="n-text"></div>
+    <div></div><div>2. ยืนยันราคาสินค้าภายใน <input id="fConfirm" class="n-in" inputmode="numeric"> วัน</div>
+    <div></div><div>3. <select id="fPay" title="เลือก เครดิต / ชำระเป็นเงินสด"><option value="credit">เครดิต</option><option value="cash">ชำระเป็นเงินสด</option></select><span class="pay-caret no-print" id="payCaret">▾</span><span id="creditWrap"> <input id="fCredit" class="n-in" inputmode="numeric"> วัน</span></div>
+  </div>
+
+  <div class="closing">จึงเรียนมาเพื่อทราบ</div>
+
+  <div class="sign">
+    <img src="assets/signature.png" alt="">
+    <div>(นายไพบูลย์&nbsp;&nbsp;ชัยชนะวิชชกิจ)</div>
+    <div>กรรมการผู้จัดการ</div>
+  </div>
+  </td></tr></tbody>
+  </table>
+</div>
+
+<datalist id="dlAttn"></datalist>
+<datalist id="dlCompany"></datalist>
+<div class="suggest no-print" id="suggest"></div>
+
+<!-- open old quotation -->
+<div class="modal-bg" id="mOpen">
+  <div class="modal">
+    <h3>เปิดใบเสนอราคาเก่า</h3>
+    <div class="body">
+      <input type="search" id="openSearch" placeholder="ค้นหา: เลขที่ / ผู้ติดต่อ / บริษัท / วันที่ / รหัสสินค้า">
+      <div class="older-years" id="olderYears"></div>
+      <table class="list">
+        <thead><tr><th>เลขที่</th><th>วันที่</th><th>เรียน</th><th>บริษัท</th><th class="num">Total</th><th></th></tr></thead>
+        <tbody id="openList"></tbody>
+      </table>
+    </div>
+    <div class="foot"><button data-close>ปิด</button></div>
+  </div>
+</div>
+
+<!-- save an existing quotation -->
+<div class="modal-bg" id="mSave">
+  <div class="modal" style="width:min(520px,94vw)">
+    <h3>บันทึก <span id="saveNo"></span></h3>
+    <div class="body">
+      <label class="opt"><input type="radio" name="saveMode" value="rev" checked> บันทึกเป็นฉบับแก้ไข <b id="saveRevNo"></b>
+        <small>ใบเดิมยังเก็บไว้ เหมาะกับใบที่ส่งให้ลูกค้าไปแล้ว</small></label>
+      <label class="opt"><input type="radio" name="saveMode" value="over"> บันทึกทับ <b id="saveOverNo"></b>
+        <small>แทนที่ข้อมูลเดิม ใช้กับใบที่ยังไม่ได้ส่งลูกค้า</small></label>
+      <div id="revNoteWrap" style="margin-top:10px">
+        <div style="margin-bottom:4px">หมายเหตุการแก้ไข (ไม่บังคับ)</div>
+        <textarea id="revNote" rows="2" placeholder="เช่น ลดราคารายการที่ 2, เพิ่มสินค้า"></textarea>
+      </div>
+    </div>
+    <div class="foot"><button data-close>ยกเลิก</button><button class="primary" id="btnSaveConfirm">บันทึก</button></div>
+  </div>
+</div>
+
+<!-- permanent delete -->
+<div class="modal-bg" id="mDelete">
+  <div class="modal" style="width:min(520px,94vw)">
+    <h3>ลบใบเสนอราคา <span id="delNo"></span> ถาวร</h3>
+    <div class="body">
+      <p style="margin:0 0 8px">ข้อมูลจะถูกลบออกจากทั้ง sheet "ทะเบียน" และ "รายการสินค้า"
+        ระบบจะสำรองไฟล์ทะเบียนไว้ใน <b>backup/</b> ก่อนลบ</p>
+      <p style="margin:0;color:#8a5a00">ใช้กับใบทดลองหรือใบที่บันทึกผิดเท่านั้น
+        ถ้าส่งลูกค้าไปแล้ว ให้ใช้ "ยกเลิกใบ" แทน — ถ้าลบเลขล่าสุดของวัน เลขนั้นจะถูกใช้ซ้ำ</p>
+    </div>
+    <div class="foot">
+      <button data-close>ไม่ลบ</button>
+      <button class="danger" id="delAll"></button>
+      <button class="danger" id="delOne"></button>
+    </div>
+  </div>
+</div>
+
+<!-- program version / update / roll back -->
+<div class="modal-bg" id="mVersion">
+  <div class="modal" style="width:min(580px,94vw)">
+    <h3>เวอร์ชันโปรแกรม</h3>
+    <div class="body">
+      <div>เวอร์ชันที่ใช้อยู่: <b id="verCurrent"></b></div>
+      <div class="ver-box" id="verOnline"></div>
+      <div>
+        <button id="btnUpdateFile">อัปเดตจากไฟล์...</button>
+        <span style="color:#777;font-size:13px">เลือกไฟล์ quotation.html เวอร์ชันใหม่ที่ได้รับมา</span>
+        <input type="file" id="updFile" accept=".html,text/html" hidden>
+      </div>
+      <h4>เวอร์ชันก่อนหน้า (ย้อนกลับได้)</h4>
+      <table class="list"><tbody id="verBackups"></tbody></table>
+      <p style="color:#777;font-size:13px;margin:12px 0 0">การอัปเดตเปลี่ยนเฉพาะไฟล์โปรแกรม — ข้อมูลหลัก ทะเบียน และ PDF ไม่ถูกแตะ</p>
+    </div>
+    <div class="foot"><button data-close>ปิด</button></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+'use strict';
+
+// ===================== constants =====================
+const REG_DIR = 'ทะเบียน';                         // ทะเบียน/ทะเบียน_2026.xlsx, ทะเบียน_2027.xlsx, ...
+const regFileName = (y) => `ทะเบียน_${y}.xlsx`;
+const LEGACY_REG_FILE = 'ทะเบียนใบเสนอราคา.xlsx';   // single register used up to Draft 3
+const BACKUP_DIR = 'backup';
+const BACKUP_DAYS = 30;
+const PDF_DIR = 'pdf';                              // pdf/2026/10/
+const SH_QUOTES = 'ทะเบียน';
+const SH_ITEMS = 'รายการสินค้า';
+const Q_HEAD = ['เลขที่', 'เลขที่หลัก', 'ฉบับแก้ไข', 'วันที่', 'เรียน', 'บริษัท', 'ข้อความเปิด',
+  'หมายเหตุ 1', 'ยืนยันราคา (วัน)', 'เครดิต (วัน)', 'Total', 'หมายเหตุการแก้ไข', 'บันทึกล่าสุด', 'สถานะ', 'หมายเหตุยกเลิก'];
+const CANCELLED = 'ยกเลิก';
+const I_HEAD = ['เลขที่', 'ลำดับ', 'รหัสสินค้า', 'รายละเอียด', 'จำนวน', 'ราคา/หน่วย', 'รวม'];
+// master data: maintained by people in Excel, read-only for this program
+const MASTER_FILE = 'ข้อมูลหลัก.xlsx';
+const SH_M_PROD = 'สินค้า';
+const SH_M_CUST = 'ลูกค้า';
+const MP_HEAD = ['รหัสสินค้า', 'รายละเอียด', 'ราคามาตรฐาน'];
+const MC_HEAD = ['ชื่อผู้ติดต่อ', 'บริษัท', 'เครดิต (วัน)', 'ยืนยันราคา (วัน)'];
+const DEFAULTS = {
+  intro: 'บริษัทฯ ขอเสนอราคาสินค้า ดังรายละเอียด',
+  note1: 'ราคาสินค้าไม่รวมภาษีมูลค่าเพิ่ม',
+  confirmDays: '15',
+  creditDays: '60',
+};
+// a customer who pays cash has "เงินสด" in เครดิต (วัน) (master data and register) instead of a number of days
+const CASH = 'เงินสด';
+const isCash = (v) => String(v ?? '').replace(/\s+/g, '').includes(CASH);
+const MIN_ROWS = 10;
+// product code column: grows with the longest code in the quotation, up to CODE_MAX_PCT; longer codes wrap
+const CODE_MIN_PCT = 14, CODE_MAX_PCT = 25, CODE_DESC_PCT = 58;   // code + description share 58% of the table
+const TH_MONTHS = ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
+  'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'];
+
+const $ = (id) => document.getElementById(id);
+
+// ===================== state =====================
+let dirHandle = null;           // folder that holds the register
+let register = { quotes: [], items: [] };
+let master = { products: [], customers: [] };
+let current = null;             // quotation on screen
+let dirty = false;
+let termsTouched = false;       // credit/confirm days edited by hand -> don't auto-fill them
+let dateTouched = false;        // date edited by hand -> don't move it to today
+
+function blankQuote() {
+  return {
+    no: '', base: '', rev: 0, date: todayISO(), attn: '', company: '',
+    intro: DEFAULTS.intro, note1: DEFAULTS.note1,
+    confirmDays: DEFAULTS.confirmDays, creditDays: DEFAULTS.creditDays,
+    revNote: '', status: '', cancelNote: '', items: [],
+  };
+}
+
+// ===================== helpers =====================
+function pad(n, w = 2) { return String(n).padStart(w, '0'); }
+function todayISO() { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; }
+function nowStamp() { const d = new Date(); return `${todayISO()} ${pad(d.getHours())}:${pad(d.getMinutes())}`; }
+function thaiDate(iso) {
+  if (!iso) return '';
+  const [y, m, d] = iso.split('-').map(Number);
+  return `${d} ${TH_MONTHS[m - 1]} ${y + 543}`;
+}
+function shortDate(iso) { if (!iso) return ''; const [y, m, d] = iso.split('-'); return `${d}/${m}/${y}`; }
+function toNum(v) {
+  if (typeof v === 'number') return v;
+  const s = String(v ?? '').replace(/,/g, '').trim();
+  if (s === '') return null;
+  const n = Number(s);
+  return Number.isFinite(n) ? n : null;
+}
+function money(n) { return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+function round2(n) { return Math.round(n * 100) / 100; }
+
+// Excel date serial <-> ISO (UTC based to avoid timezone drift)
+const EXCEL_EPOCH = Date.UTC(1899, 11, 30);
+function isoToSerial(iso) { const [y, m, d] = iso.split('-').map(Number); return (Date.UTC(y, m - 1, d) - EXCEL_EPOCH) / 864e5; }
+function cellToISO(v) {
+  if (v === '' || v == null) return '';
+  if (typeof v === 'number') {
+    const d = new Date(EXCEL_EPOCH + Math.round(v) * 864e5);
+    return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
+  }
+  const s = String(v).trim();
+  let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (m) return `${m[1]}-${pad(m[2])}-${pad(m[3])}`;
+  m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (m) { let y = +m[3]; if (y > 2400) y -= 543; return `${y}-${pad(m[2])}-${pad(m[1])}`; }
+  return '';
+}
+
+function toast(msg, isErr = false, ms = 3500) {
+  const t = $('toast');
+  t.textContent = msg; t.classList.toggle('err', isErr); t.classList.add('show');
+  clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove('show'), ms);
+}
+
+// ===================== numbering =====================
+// QT-YYYYMM-NNN, NNN resets every month (numbers up to Oct 2026 were QT-YYMMDD-NN and keep working)
+function basePrefix(iso) { const [y, m] = iso.split('-'); return `QT-${y}${m}-`; }
+const NEW_NO = /^QT-(20\d\d)(0[1-9]|1[0-2])-\d{3,}/, OLD_NO = /^QT-(\d{2})(\d{2})(\d{2})-(\d+)/;
+// sort key: old daily numbers sort before the new monthly ones of the same month
+function noKey(base) {
+  if (NEW_NO.test(base)) return base;
+  const m = String(base).match(OLD_NO);
+  return m ? `QT-20${m[1]}${m[2]}-!${m[3]}${m[4]}` : String(base);
+}
+function nextBaseNumber(iso, reg = register) {
+  const prefix = basePrefix(iso);
+  let max = 0;
+  for (const q of reg.quotes) {
+    if (q.base.startsWith(prefix)) { const n = parseInt(q.base.slice(prefix.length), 10); if (n > max) max = n; }
+  }
+  return prefix + pad(max + 1, 3);
+}
+function nextRev(base, reg = register) {
+  let max = 0;
+  for (const q of reg.quotes) if (q.base === base && q.rev > max) max = q.rev;
+  return max + 1;
+}
+function fullNo(base, rev) { return rev > 0 ? `${base}-R${rev}` : base; }
+
+// ===================== folder access (File System Access API) =====================
+const idb = {
+  open() {
+    return new Promise((res, rej) => {
+      const r = indexedDB.open('siamphan-quotation', 1);
+      r.onupgradeneeded = () => r.result.createObjectStore('kv');
+      r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+    });
+  },
+  async get(k) {
+    const db = await this.open();
+    return new Promise((res, rej) => { const r = db.transaction('kv').objectStore('kv').get(k); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
+  },
+  async set(k, v) {
+    const db = await this.open();
+    return new Promise((res, rej) => { const t = db.transaction('kv', 'readwrite'); t.objectStore('kv').put(v, k); t.oncomplete = res; t.onerror = () => rej(t.error); });
+  },
+};
+
+function setFolderStatus() {
+  const s = $('folderStatus');
+  if (dirHandle) {
+    const years = [...regs.keys()].filter((y) => regs.get(y).quotes.length).sort();
+    const span = years.length ? ` (ปี ${years[0]}${years.length > 1 ? '–' + years[years.length - 1] : ''})` : '';
+    s.textContent = `📁 ${dirHandle.name} · ${register.quotes.length} ใบ${span} · ข้อมูลหลัก: สินค้า ${master.products.length} / ลูกค้า ${master.customers.length}`;
+    s.classList.remove('off');
+    $('btnFolder').textContent = 'เปลี่ยน folder';
+  } else {
+    s.textContent = 'ยังไม่ได้เชื่อมต่อ folder';
+    s.classList.add('off');
+    $('btnFolder').textContent = 'เชื่อมต่อ folder';
+  }
+}
+
+async function restoreFolder() {
+  if (!('showDirectoryPicker' in window)) return;
+  try {
+    const h = await idb.get('dir');
+    if (h && (await h.queryPermission({ mode: 'readwrite' })) === 'granted') {
+      dirHandle = h;
+      await loadRegister();
+    }
+  } catch (e) { console.warn(e); }
+  setFolderStatus();
+}
+
+// must be called from a click
+async function connectFolder(forcePick = false) {
+  if (!('showDirectoryPicker' in window)) {
+    alert('เบราว์เซอร์นี้ไม่รองรับการบันทึกลง folder\nกรุณาเปิดไฟล์นี้ด้วย Google Chrome หรือ Microsoft Edge');
+    return false;
+  }
+  try {
+    let h = forcePick ? null : await idb.get('dir');
+    if (h && (await h.requestPermission({ mode: 'readwrite' })) !== 'granted') h = null;
+    if (!h) {
+      h = await window.showDirectoryPicker({ id: 'siamphan-quotation', mode: 'readwrite' });
+      let hasApp = true;
+      try { await h.getFileHandle('quotation.html'); } catch { hasApp = false; }
+      if (!hasApp && !confirm(`folder "${h.name}" ไม่มีไฟล์ quotation.html\nแนะนำให้เลือก folder เดียวกับไฟล์โปรแกรม\n\nใช้ folder นี้ต่อหรือไม่?`)) return false;
+    }
+    dirHandle = h;
+    await idb.set('dir', h);
+    await loadRegister();
+    setFolderStatus();
+    toast(`เชื่อมต่อ folder "${h.name}" แล้ว (${register.quotes.length} ใบ)`);
+    return true;
+  } catch (e) {
+    if (e.name !== 'AbortError') toast('เชื่อมต่อ folder ไม่สำเร็จ: ' + e.message, true);
+    return false;
+  }
+}
+
+async function ensureFolder() {
+  if (dirHandle && (await dirHandle.queryPermission({ mode: 'readwrite' })) === 'granted') return true;
+  return connectFolder();
+}
+
+// ===================== register read / write =====================
+function sheetRows(ws) { return ws ? XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: '' }) : []; }
+
+// map header names to column indexes so columns may be reordered in Excel
+function headerIndex(row, names) {
+  const idx = {};
+  names.forEach((n) => { idx[n] = row.findIndex((h) => String(h).trim() === n); });
+  return idx;
+}
+
+function parseRegister(wb) {
+  const quotes = [], items = [];
+  const iRows = sheetRows(wb.Sheets[SH_ITEMS]);
+  if (iRows.length) {
+    const h = headerIndex(iRows[0], I_HEAD);
+    const g = (r, k) => (h[k] >= 0 ? r[h[k]] : '');
+    for (const r of iRows.slice(1)) {
+      const no = String(g(r, 'เลขที่')).trim();
+      if (!no) continue;
+      items.push({
+        no, seq: toNum(g(r, 'ลำดับ')) ?? 0,
+        code: String(g(r, 'รหัสสินค้า')).trim(), desc: String(g(r, 'รายละเอียด')),
+        qty: toNum(g(r, 'จำนวน')), price: toNum(g(r, 'ราคา/หน่วย')),
+      });
+    }
+  }
+  const qRows = sheetRows(wb.Sheets[SH_QUOTES]);
+  if (qRows.length) {
+    const h = headerIndex(qRows[0], Q_HEAD);
+    const g = (r, k) => (h[k] >= 0 ? r[h[k]] : '');
+    for (const r of qRows.slice(1)) {
+      const no = String(g(r, 'เลขที่')).trim();
+      if (!no) continue;
+      const m = no.match(/^(.*?)(?:-R(\d+))?$/);
+      quotes.push({
+        no,
+        base: String(g(r, 'เลขที่หลัก')).trim() || m[1],
+        rev: toNum(g(r, 'ฉบับแก้ไข')) ?? (m[2] ? +m[2] : 0),
+        date: cellToISO(g(r, 'วันที่')),
+        attn: String(g(r, 'เรียน')), company: String(g(r, 'บริษัท')),
+        intro: String(g(r, 'ข้อความเปิด')), note1: String(g(r, 'หมายเหตุ 1')),
+        confirmDays: String(g(r, 'ยืนยันราคา (วัน)')), creditDays: String(g(r, 'เครดิต (วัน)')),
+        revNote: String(g(r, 'หมายเหตุการแก้ไข')), saved: String(g(r, 'บันทึกล่าสุด')),
+        status: String(g(r, 'สถานะ')).trim(), cancelNote: String(g(r, 'หมายเหตุยกเลิก')),
+      });
+    }
+  }
+  return { quotes, items };
+}
+
+function quoteTotal(reg, no) {
+  return round2(reg.items.filter((i) => i.no === no).reduce((s, i) => s + (i.qty ?? 0) * (i.price ?? 0), 0));
+}
+// all totals in one pass; use this instead of quoteTotal() inside loops over quotations
+function quoteTotals(reg) {
+  const m = new Map();
+  for (const i of reg.items) m.set(i.no, (m.get(i.no) ?? 0) + (i.qty ?? 0) * (i.price ?? 0));
+  for (const [k, v] of m) m.set(k, round2(v));
+  return m;
+}
+
+function buildWorkbook(reg) {
+  const quotes = [...reg.quotes].sort((a, b) => quoteOrder(a).localeCompare(quoteOrder(b)));
+  const order = new Map(quotes.map((q, i) => [q.no, i]));
+  const totals = quoteTotals(reg);
+  const items = [...reg.items].sort((a, b) => (order.get(a.no) ?? 1e9) - (order.get(b.no) ?? 1e9) || a.seq - b.seq);
+
+  // items sheet: รวม = จำนวน x ราคา/หน่วย
+  const iAoa = [I_HEAD, ...items.map((i) => [i.no, i.seq, i.code, i.desc, i.qty ?? '', i.price ?? '', null])];
+  const wsI = XLSX.utils.aoa_to_sheet(iAoa);
+  items.forEach((it, k) => {
+    const r = k + 2;
+    wsI[`G${r}`] = { t: 'n', v: round2((it.qty ?? 0) * (it.price ?? 0)), f: `E${r}*F${r}`, z: '#,##0.00' };
+    if (it.price != null) wsI[`F${r}`].z = '#,##0.00';
+  });
+  wsI['!cols'] = [{ wch: 16 }, { wch: 6 }, { wch: 14 }, { wch: 55 }, { wch: 8 }, { wch: 12 }, { wch: 13 }];
+  wsI['!autofilter'] = { ref: `A1:G${Math.max(2, items.length + 1)}` };
+
+  // quotes sheet: Total = SUMIF over items sheet
+  const qAoa = [Q_HEAD, ...quotes.map((q) => [q.no, q.base, q.rev, q.date ? isoToSerial(q.date) : '', q.attn, q.company,
+    q.intro, q.note1, toNum(q.confirmDays) ?? q.confirmDays, toNum(q.creditDays) ?? q.creditDays, null, q.revNote, q.saved,
+    q.status || '', q.cancelNote || ''])];
+  const wsQ = XLSX.utils.aoa_to_sheet(qAoa);
+  quotes.forEach((q, k) => {
+    const r = k + 2;
+    if (q.date) wsQ[`D${r}`].z = 'dd/mm/yyyy';
+    wsQ[`K${r}`] = { t: 'n', v: totals.get(q.no) ?? 0, f: `SUMIF('${SH_ITEMS}'!A:A,A${r},'${SH_ITEMS}'!G:G)`, z: '#,##0.00' };
+  });
+  wsQ['!cols'] = [{ wch: 16 }, { wch: 14 }, { wch: 9 }, { wch: 11 }, { wch: 26 }, { wch: 34 }, { wch: 36 },
+    { wch: 30 }, { wch: 14 }, { wch: 11 }, { wch: 13 }, { wch: 30 }, { wch: 17 }, { wch: 9 }, { wch: 30 }];
+  wsQ['!autofilter'] = { ref: `A1:O${Math.max(2, quotes.length + 1)}` };
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, wsQ, SH_QUOTES);
+  XLSX.utils.book_append_sheet(wb, wsI, SH_ITEMS);
+  return wb;
+}
+
+// ===================== register files: one per year in ทะเบียน/ =====================
+const regs = new Map();   // year -> {quotes, items} as last read from / written to disk
+
+// QT-YYYYMM-.. -> YYYY (old QT-YYMMDD-.. -> 20YY); a revision always lives in the same file as its original
+function yearOfNo(no) {
+  let m = String(no).match(NEW_NO);
+  if (m) return Number(m[1]);
+  m = String(no).match(OLD_NO);
+  return m ? 2000 + Number(m[1]) : null;
+}
+function yearOfQuote(q) { return yearOfNo(q.base || q.no) ?? Number(String(q.date || todayISO()).slice(0, 4)); }
+function yearOfKnownNo(no) {
+  const q = register.quotes.find((x) => x.no === no);
+  return q ? yearOfQuote(q) : yearOfNo(no);
+}
+
+function rebuildRegister() {
+  const quotes = [], items = [];
+  for (const r of regs.values()) { quotes.push(...r.quotes); items.push(...r.items); }
+  register = { quotes, items };
+}
+
+const regDir = () => dirHandle.getDirectoryHandle(REG_DIR, { create: true });
+
+async function readYearFile(y) {
+  let fh;
+  try { fh = await (await regDir()).getFileHandle(regFileName(y)); } catch (e) {
+    if (e.name === 'NotFoundError') return { quotes: [], items: [] };
+    throw e;
+  }
+  const buf = await (await fh.getFile()).arrayBuffer();
+  return parseRegister(XLSX.read(buf, { type: 'array' }));
+}
+
+async function listYears() {
+  const years = [];
+  for await (const h of (await regDir()).values()) {
+    const m = h.kind === 'file' && h.name.match(/^ทะเบียน_(\d{4})\.xlsx$/);
+    if (m) years.push(Number(m[1]));
+  }
+  return years.sort((a, b) => b - a);
+}
+
+// this year and last year are enough for numbering, suggestions and everyday searching;
+// older years stay loaded once they were asked for
+async function loadRegister(extraYears = []) {
+  await migrateLegacyRegister();
+  const y = new Date().getFullYear();
+  for (const yr of new Set([y, y - 1, ...regs.keys(), ...extraYears])) regs.set(yr, await readYearFile(yr));
+  rebuildRegister();
+  await loadMaster();
+  pruneBackups();
+}
+
+async function writeBytes(dir, name, bytes) {
+  const w = await (await dir.getFileHandle(name, { create: true })).createWritable();
+  try { await w.write(bytes); await w.close(); } catch (e) { try { await w.abort(); } catch {} throw e; }
+}
+
+// Draft 3 and earlier kept one register in the main folder: split it into per-year files once.
+// The original is copied to backup/ first and kept there permanently.
+async function migrateLegacyRegister() {
+  let legacy;
+  try { legacy = await dirHandle.getFileHandle(LEGACY_REG_FILE); } catch { return; }
+  if ((await listYears()).length) {
+    if (!migrateLegacyRegister.warned) toast(`ไฟล์ "${LEGACY_REG_FILE}" ไม่ได้ใช้แล้ว (ข้อมูลอยู่ใน ${REG_DIR}/) ลบไฟล์นี้ได้`, false, 6000);
+    migrateLegacyRegister.warned = true;
+    return;
+  }
+  const buf = await (await legacy.getFile()).arrayBuffer();
+  const old = parseRegister(XLSX.read(buf, { type: 'array' }));
+  const bdir = await dirHandle.getDirectoryHandle(BACKUP_DIR, { create: true });
+  await writeBytes(bdir, `ทะเบียนใบเสนอราคา_ก่อนแยกปี_${todayISO()}.xlsx`, buf);
+  const byYear = new Map();
+  const yearByNo = new Map();
+  for (const q of old.quotes) {
+    const y = yearOfQuote(q); yearByNo.set(q.no, y);
+    if (!byYear.has(y)) byYear.set(y, { quotes: [], items: [] });
+    byYear.get(y).quotes.push(q);
+  }
+  for (const i of old.items) { const y = yearByNo.get(i.no); if (y != null) byYear.get(y).items.push(i); }
+  for (const [y, reg] of byYear) await writeYearFile(y, reg, false);
+  try {
+    await dirHandle.removeEntry(LEGACY_REG_FILE);
+    toast(`ย้ายทะเบียนเดิมไปไว้ใน ${REG_DIR}/ แล้ว (${old.quotes.length} ใบ) — สำเนาไฟล์เดิมอยู่ใน ${BACKUP_DIR}/`, false, 7000);
+  } catch {
+    migrateLegacyRegister.warned = true;
+    toast(`ย้ายข้อมูลไป ${REG_DIR}/ แล้ว แต่ลบไฟล์ "${LEGACY_REG_FILE}" ไม่ได้ (อาจเปิดอยู่ใน Excel) — ปิดแล้วลบไฟล์นี้ได้เลย`, true, 9000);
+  }
+}
+
+function parseMaster(wb) {
+  const read = (sheet, names) => {
+    const rows = sheetRows(wb.Sheets[sheet]);
+    if (!rows.length) return [];
+    const h = headerIndex(rows[0], names);
+    return rows.slice(1).map((r) => Object.fromEntries(names.map((n) => [n, h[n] >= 0 ? r[h[n]] : ''])));
+  };
+  const products = read(SH_M_PROD, MP_HEAD)
+    .map((r) => ({ code: String(r['รหัสสินค้า']).trim(), desc: String(r['รายละเอียด']).trim(), price: toNum(r['ราคามาตรฐาน']) }))
+    .filter((p) => p.code || p.desc);
+  const customers = read(SH_M_CUST, MC_HEAD)
+    .map((r) => ({ attn: String(r['ชื่อผู้ติดต่อ']).trim(), company: String(r['บริษัท']).trim(),
+      creditDays: String(r['เครดิต (วัน)']).trim(), confirmDays: String(r['ยืนยันราคา (วัน)']).trim() }))
+    .filter((c) => c.attn || c.company);
+  return { products, customers };
+}
+
+// the master file is optional; a read problem must never block quotations
+async function loadMaster(quiet = false) {
+  try {
+    const fh = await dirHandle.getFileHandle(MASTER_FILE);
+    const buf = await (await fh.getFile()).arrayBuffer();
+    master = parseMaster(XLSX.read(buf, { type: 'array' }));
+  } catch (e) {
+    master = { products: [], customers: [] };
+    if (e.name !== 'NotFoundError' && !quiet) toast(`อ่าน "${MASTER_FILE}" ไม่ได้: ${e.message}`, true);
+  }
+  refreshDatalists();
+  setFolderStatus();
+}
+
+// keep one copy per day of a year's register as it was before the first save of that day;
+// with a label (e.g. before deleting) always make an extra time-stamped copy
+async function backupYearFile(y, label = '') {
+  let src;
+  try { src = await (await regDir()).getFileHandle(regFileName(y)); } catch { return; }
+  const bdir = await dirHandle.getDirectoryHandle(BACKUP_DIR, { create: true });
+  const d = new Date();
+  const name = label
+    ? `ทะเบียน_${y}_${todayISO()}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}_${label}.xlsx`
+    : `ทะเบียน_${y}_${todayISO()}.xlsx`;
+  if (!label) { try { await bdir.getFileHandle(name); return; } catch { /* not backed up yet today */ } }
+  await writeBytes(bdir, name, await (await src.getFile()).arrayBuffer());
+}
+
+async function writeYearFile(y, reg, backup = true) {
+  const bytes = XLSX.write(buildWorkbook(reg), { bookType: 'xlsx', type: 'array', compression: true });
+  if (backup) await backupYearFile(y);
+  await writeBytes(await regDir(), regFileName(y), bytes);
+}
+
+// drop backups older than BACKUP_DAYS (dated by the YYYY-MM-DD in their name);
+// the copy made when the old single register was split is kept for good
+async function pruneBackups() {
+  try {
+    const bdir = await dirHandle.getDirectoryHandle(BACKUP_DIR, { create: true });
+    const d = new Date(); d.setDate(d.getDate() - BACKUP_DAYS);
+    const cutoff = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    const old = [];
+    for await (const h of bdir.values()) {
+      const m = h.kind === 'file' && h.name.match(/_(\d{4}-\d{2}-\d{2})(?:_|\.xlsx$)/);
+      if (m && m[1] < cutoff && !h.name.includes('ก่อนแยกปี')) old.push(h.name);
+    }
+    for (const n of old) await bdir.removeEntry(n);
+  } catch (e) { console.warn('pruneBackups', e); }
+}
+
+// ===================== form <-> state =====================
+function rowHTML() {
+  return `<td class="cell c-no"></td>
+    <td class="cell c-code"><textarea data-k="code" rows="1" autocomplete="off"></textarea></td>
+    <td class="cell c-desc"><textarea data-k="desc" rows="1"></textarea></td>
+    <td class="cell c-qty"><input data-k="qty" inputmode="decimal"></td>
+    <td class="cell c-price"><input data-k="price" inputmode="decimal"></td>
+    <td class="cell c-sum"></td>`;
+}
+
+function addRow(item = {}) {
+  const tr = document.createElement('tr');
+  tr.innerHTML = rowHTML();
+  tr.querySelector('[data-k=code]').value = item.code ?? '';
+  tr.querySelector('[data-k=desc]').value = item.desc ?? '';
+  tr.querySelector('[data-k=qty]').value = item.qty ?? '';
+  const p = tr.querySelector('[data-k=price]');
+  p.value = item.price != null ? money(item.price) : '';
+  const del = document.createElement('button');
+  del.className = 'row-del'; del.title = 'ลบแถว'; del.textContent = '✕';
+  tr.querySelector('.c-sum').appendChild(del);
+  $('itemsBody').appendChild(tr);
+  tr.querySelectorAll('textarea').forEach(autoGrow);
+  return tr;
+}
+
+function autoGrow(ta) { ta.style.height = 'auto'; ta.style.height = ta.scrollHeight + 'px'; }
+
+// width of `text` in the font of element `el`
+function textWidth(text, el) {
+  const ctx = textWidth.ctx ??= document.createElement('canvas').getContext('2d');
+  const cs = getComputedStyle(el);
+  ctx.font = `${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
+  return ctx.measureText(text).width;
+}
+
+function fitCodeColumn() {
+  const codes = [...$('itemsBody').querySelectorAll('[data-k=code]')];
+  if (!codes.length) return;
+  const th = document.querySelector('th.c-code');
+  const tableW = th.closest('table').clientWidth;
+  if (!tableW) return;
+  const longest = Math.max(0, ...codes.map((c) => textWidth(c.value.trim(), c)));
+  const pct = Math.min(CODE_MAX_PCT, Math.max(CODE_MIN_PCT, Math.ceil((longest + 16) / tableW * 100)));
+  if (th.style.width === pct + '%') return;
+  th.style.width = pct + '%';
+  document.querySelector('th.c-desc').style.width = (CODE_DESC_PCT - pct) + '%';
+  $('itemsBody').querySelectorAll('textarea').forEach(autoGrow);
+}
+
+// เครดิต <n> วัน  or  ชำระเป็นเงินสด
+function setPayTerm(v) {
+  const cash = isCash(v);
+  $('fPay').value = cash ? 'cash' : 'credit';
+  if (!cash) $('fCredit').value = v;
+  else if (!$('fCredit').value.trim()) $('fCredit').value = DEFAULTS.creditDays;
+  showPayTerm();
+}
+function showPayTerm() {
+  const sel = $('fPay');
+  $('creditWrap').style.display = sel.value === 'cash' ? 'none' : '';
+  sel.style.width = Math.ceil(textWidth(sel.selectedOptions[0].text, sel) + 6) + 'px';
+}
+
+function readRows() {
+  return [...$('itemsBody').rows].map((tr) => ({
+    code: tr.querySelector('[data-k=code]').value.trim(),
+    desc: tr.querySelector('[data-k=desc]').value,
+    qty: toNum(tr.querySelector('[data-k=qty]').value),
+    price: toNum(tr.querySelector('[data-k=price]').value),
+  }));
+}
+const isEmptyItem = (i) => !i.code && !i.desc.trim() && i.qty == null && i.price == null;
+
+function recalc() {
+  let total = 0, seq = 0;
+  const rows = [...$('itemsBody').rows];
+  const data = readRows();
+  // number only up to the last filled row
+  let last = -1; data.forEach((d, k) => { if (!isEmptyItem(d)) last = k; });
+  rows.forEach((tr, k) => {
+    const d = data[k];
+    const seqCell = tr.querySelector('.c-no');
+    seqCell.textContent = k <= last ? ++seq : '';
+    const sumCell = tr.querySelector('.c-sum');
+    const del = sumCell.querySelector('.row-del');
+    sumCell.textContent = '';
+    if (d.qty != null && d.price != null) {
+      const s = round2(d.qty * d.price); total += s; sumCell.append(money(s));
+    }
+    sumCell.appendChild(del);
+  });
+  $('fTotal').textContent = money(round2(total));
+}
+
+function fillForm(q) {
+  current = q;
+  termsTouched = !!q.no;   // a saved quotation keeps its own terms
+  dateTouched = !!q.no;    // ... and its own date
+  $('fNo').textContent = q.no || '(ออกเลขอัตโนมัติเมื่อบันทึก)';
+  $('fNo').classList.toggle('pending', !q.no);
+  $('fDate').value = q.date;
+  $('fDateText').textContent = thaiDate(q.date);
+  $('fAttn').value = q.attn; $('fCompany').value = q.company; $('fIntro').value = q.intro;
+  syncPrintHeader();
+  $('fNote1').value = q.note1; $('fConfirm').value = q.confirmDays;
+  $('fCredit').value = ''; setPayTerm(q.creditDays);
+  $('itemsBody').innerHTML = '';
+  q.items.forEach((i) => addRow(i));
+  for (let k = q.items.length; k < MIN_ROWS; k++) addRow();
+  fitCodeColumn();
+  recalc();
+  setDirty(false);
+}
+
+function readForm() {
+  const items = readRows();
+  let last = -1; items.forEach((d, k) => { if (!isEmptyItem(d)) last = k; });
+  return {
+    ...current,
+    date: $('fDate').value || todayISO(),
+    attn: $('fAttn').value.trim(), company: $('fCompany').value.trim(), intro: $('fIntro').value.trim(),
+    note1: $('fNote1').value.trim(), confirmDays: $('fConfirm').value.trim(),
+    creditDays: $('fPay').value === 'cash' ? CASH : $('fCredit').value.trim(),
+    items: items.slice(0, last + 1),
+  };
+}
+
+function syncPrintHeader() { $('pAttn').textContent = $('fAttn').value; $('pCompany').textContent = $('fCompany').value; }
+
+function setDirty(v) {
+  dirty = v;
+  showStatus();
+}
+
+function showStatus() {
+  const s = $('docState');
+  const cancelled = current?.status === CANCELLED;
+  if (!current?.no) s.textContent = dirty ? 'ใบใหม่ · ยังไม่บันทึก' : 'ใบใหม่';
+  else if (cancelled) s.textContent = `${current.no} · ยกเลิกแล้ว${dirty ? ' · มีการแก้ไข' : ''}`;
+  else s.textContent = dirty ? `${current.no} · มีการแก้ไข` : `${current.no} · บันทึกแล้ว`;
+  s.classList.toggle('dirty', dirty);
+  s.classList.toggle('cancelled', cancelled);
+  $('sheet').classList.toggle('is-cancelled', cancelled);
+  $('stampNote').textContent = cancelled && current.cancelNote ? current.cancelNote : '';
+}
+
+// [{code, desc, std, last, star}]: std = master standard price, last = latest quoted price, star = in master data
+let products = [];
+
+// names that differ only by spaces or letter case are the same ("คุณ สรุจ" = "คุณสรุจ")
+const nameKey = (s) => String(s ?? '').replace(/\s+/g, '').toLowerCase();
+
+function refreshDatalists() {
+  // one spelling per name: master data first, then the most recent quotation's spelling
+  const uniq = (arr) => {
+    const m = new Map();
+    for (const v of arr) { const k = nameKey(v); if (k && !m.has(k)) m.set(k, v.trim()); }
+    return [...m.values()].sort((a, b) => a.localeCompare(b, 'th'));
+  };
+  const recent = [...register.quotes].sort((a, b) => quoteOrder(b).localeCompare(quoteOrder(a)));
+  const fill = (id, vals) => { $(id).innerHTML = ''; vals.forEach((v) => { const o = document.createElement('option'); o.value = v; $(id).appendChild(o); }); };
+  fill('dlAttn', uniq([...master.customers.map((c) => c.attn), ...recent.map((q) => q.attn)]));
+  fill('dlCompany', uniq([...master.customers.map((c) => c.company), ...recent.map((q) => q.company)]));
+  products = mergeProducts();
+}
+
+function quoteOrder(q) { return `${noKey(q.base)}|${pad(q.rev, 3)}`; }
+const productKey = (p) => (p.code ? 'c:' + nameKey(p.code) : 'd:' + nameKey(p.desc));
+
+// master products first (with their latest quoted price attached), then products only found in history
+function mergeProducts() {
+  const hist = historyProducts();
+  const histByKey = new Map(hist.map((p) => [productKey(p), p]));
+  const histByDesc = new Map(hist.map((p) => [productKey({ desc: p.desc }), p]));
+  const used = new Set();
+  const out = master.products.map((m) => {
+    const h = histByKey.get(productKey(m)) || histByDesc.get(productKey({ desc: m.desc }));
+    if (h) used.add(h);
+    return { code: m.code || h?.code || '', desc: m.desc || h?.desc || '', std: m.price, last: h ? h.price : null, star: true };
+  });
+  for (const h of hist) if (!used.has(h)) out.push({ code: h.code, desc: h.desc, std: null, last: h.price, star: false });
+  return out;
+}
+const defaultPrice = (p) => p.std ?? p.last;
+
+// one entry per product (by code, or by description when there is no code), keeping the latest quotation's values
+function historyProducts() {
+  const sortKey = new Map(register.quotes.map((q) => [q.no, quoteOrder(q)]));
+  const items = register.items.filter((i) => i.code || i.desc.trim())
+    .sort((a, b) => (sortKey.get(a.no) ?? '').localeCompare(sortKey.get(b.no) ?? '') || a.seq - b.seq);
+  const m = new Map();
+  for (const i of items) {
+    const key = productKey(i);
+    m.delete(key);   // re-insert so the most recently used products come last
+    m.set(key, { code: i.code, desc: i.desc, price: i.price });
+  }
+  return [...m.values()].reverse();
+}
+function productIndex() { return new Map(products.filter((p) => p.code).map((p) => [p.code, p])); }
+
+// latest quotation where `field` equals `value`
+function latestQuoteBy(field, value) {
+  const k = nameKey(value);
+  if (!k) return null;
+  let best = null;
+  for (const q of register.quotes) if (nameKey(q[field]) === k && (!best || quoteOrder(q) > quoteOrder(best))) best = q;
+  return best;
+}
+
+// ===================== product suggestions =====================
+const suggest = { box: null, input: null, list: [], idx: -1 };
+
+function suggestMatches(text) {
+  const terms = text.toLowerCase().split(/\s+/).filter(Boolean);
+  if (!terms.length) return [];
+  return products.filter((p) => { const s = `${p.code} ${p.desc}`.toLowerCase(); return terms.every((t) => s.includes(t)); }).slice(0, 8);
+}
+
+function showSuggest(input) {
+  const list = suggestMatches(input.value);
+  // nothing new to offer when the field already holds exactly the only match
+  if (!list.length || (list.length === 1 && (list[0].code === input.value.trim() || list[0].desc === input.value))) return hideSuggest();
+  suggest.input = input; suggest.list = list; suggest.idx = -1;
+  const box = suggest.box;
+  box.innerHTML = '';
+  list.forEach((p, k) => {
+    const row = document.createElement('div'); row.className = 'sg-item';
+    const star = document.createElement('span'); star.className = 'sg-star'; star.textContent = p.star ? '★' : '';
+    star.title = p.star ? 'อยู่ในข้อมูลหลัก' : '';
+    const code = document.createElement('span'); code.className = 'sg-code'; code.textContent = p.code || '—';
+    const desc = document.createElement('span'); desc.className = 'sg-desc'; desc.textContent = p.desc;
+    const std = document.createElement('span'); std.className = 'sg-price';
+    if (p.std != null) std.innerHTML = `<small>มาตรฐาน</small> ${money(p.std)}`;
+    const last = document.createElement('span'); last.className = 'sg-price sg-last';
+    if (p.last != null) last.innerHTML = `<small>ล่าสุด</small> ${money(p.last)}`;
+    row.append(star, code, desc, std, last);
+    row.onmousedown = (e) => { e.preventDefault(); pickSuggest(k); };
+    box.appendChild(row);
+  });
+  const td = input.closest('tr').querySelector('.c-code').getBoundingClientRect();
+  const r = input.getBoundingClientRect();
+  box.style.left = (td.left + window.scrollX) + 'px';
+  box.style.top = (r.bottom + window.scrollY + 2) + 'px';
+  box.style.display = 'block';
+}
+
+function hideSuggest() { if (suggest.box) suggest.box.style.display = 'none'; suggest.input = null; suggest.idx = -1; }
+
+function moveSuggest(d) {
+  const n = suggest.list.length;
+  suggest.idx = (suggest.idx + d + n) % n;
+  [...suggest.box.children].forEach((el, k) => el.classList.toggle('active', k === suggest.idx));
+}
+
+function pickSuggest(k) {
+  const p = suggest.list[k], tr = suggest.input.closest('tr');
+  hideSuggest();
+  const c = tr.querySelector('[data-k=code]'); c.value = p.code; autoGrow(c);
+  const d = tr.querySelector('[data-k=desc]'); d.value = p.desc; autoGrow(d);
+  fitCodeColumn();
+  const price = defaultPrice(p);
+  tr.querySelector('[data-k=price]').value = price != null ? money(price) : '';
+  const qty = tr.querySelector('[data-k=qty]');
+  setDirty(true); recalc();
+  qty.focus(); qty.select();
+}
+
+// ===================== actions =====================
+function confirmDiscard() { return !dirty || confirm('มีข้อมูลที่ยังไม่ได้บันทึก ต้องการทิ้งการแก้ไขหรือไม่?'); }
+
+function newQuote() { if (confirmDiscard()) fillForm(blankQuote()); }
+
+function copyAsNew() {
+  const q = readForm();
+  fillForm({ ...q, no: '', base: '', rev: 0, date: todayISO(), revNote: '', status: '', cancelNote: '' });
+  setDirty(true);
+  toast('คัดลอกแล้ว — จะได้เลขที่ใหม่เมื่อกดบันทึก');
+}
+
+function quoteFromRegister(no) {
+  const q = register.quotes.find((x) => x.no === no);
+  const items = register.items.filter((i) => i.no === no).sort((a, b) => a.seq - b.seq)
+    .map(({ code, desc, qty, price }) => ({ code, desc, qty, price }));
+  return { ...q, items };
+}
+
+async function openDialog() {
+  if (!(await ensureFolder())) return;
+  try { await loadRegister(); } catch (e) { toast('อ่านไฟล์ทะเบียนไม่ได้: ' + e.message, true); return; }
+  $('openSearch').value = '';
+  renderOpenList();
+  await renderOlderYears();
+  $('mOpen').classList.add('show');
+  $('openSearch').focus();
+}
+
+// years whose register file exists but is not loaded yet
+async function renderOlderYears() {
+  const wrap = $('olderYears');
+  wrap.innerHTML = '';
+  let older = [];
+  try { older = (await listYears()).filter((y) => !regs.has(y)); } catch { /* no folder yet */ }
+  const loaded = [...regs.keys()].filter((y) => regs.get(y).quotes.length).sort();
+  const info = document.createElement('span');
+  info.textContent = loaded.length ? `แสดงปี ${loaded.join(', ')}` : '';
+  if (info.textContent) wrap.appendChild(info);
+  if (!older.length) return;
+  const b = document.createElement('button');
+  b.textContent = `แสดงปีก่อนหน้าด้วย (${older.join(', ')})`;
+  b.onclick = async () => {
+    b.disabled = true; b.textContent = 'กำลังโหลด...';
+    try { await loadRegister(older); } catch (e) { toast('อ่านไฟล์ทะเบียนไม่ได้: ' + e.message, true); }
+    renderOpenList(); renderOlderYears();
+  };
+  wrap.appendChild(b);
+}
+
+function renderOpenList() {
+  const term = $('openSearch').value.trim().toLowerCase();
+  const codesByNo = new Map();
+  register.items.forEach((i) => codesByNo.set(i.no, (codesByNo.get(i.no) || '') + ' ' + i.code.toLowerCase()));
+  const list = [...register.quotes]
+    .sort((a, b) => quoteOrder(b).localeCompare(quoteOrder(a)))
+    .filter((q) => !term || [q.no, q.attn, q.company, shortDate(q.date), thaiDate(q.date), codesByNo.get(q.no) || '']
+      .join(' ').toLowerCase().includes(term));
+  const totals = quoteTotals(register);
+  const tb = $('openList');
+  tb.innerHTML = '';
+  if (!list.length) {
+    tb.innerHTML = `<tr><td colspan="6" class="empty">${register.quotes.length ? 'ไม่พบใบเสนอราคาที่ค้นหา' : 'ยังไม่มีใบเสนอราคาในทะเบียน'}</td></tr>`;
+    return;
+  }
+  for (const q of list) {
+    const cancelled = q.status === CANCELLED;
+    const tr = document.createElement('tr'); tr.className = 'r' + (cancelled ? ' cancelled' : '');
+    const c = (txt, cls) => { const td = document.createElement('td'); if (cls) td.className = cls; td.textContent = txt; tr.appendChild(td); return td; };
+    const noTd = c(q.base);
+    if (q.rev > 0) { const b = document.createElement('span'); b.className = 'rev'; b.textContent = 'R' + q.rev; noTd.appendChild(b); }
+    if (cancelled) { const b = document.createElement('span'); b.className = 'badge-cancel'; b.textContent = CANCELLED; noTd.appendChild(b); }
+    c(shortDate(q.date)); c(q.attn); c(q.company); c(money(totals.get(q.no) ?? 0), 'num');
+    const act = c('', 'acts');
+    const btn = (label, cls, fn) => {
+      const b = document.createElement('button'); b.className = 'act ' + cls; b.textContent = label;
+      b.onclick = (e) => { e.stopPropagation(); fn(); }; act.appendChild(b);
+    };
+    if (cancelled) btn('คืนสถานะ', 'restore', () => setCancelled(q.no, false));
+    else btn('ยกเลิกใบ', 'cancel', () => setCancelled(q.no, true));
+    btn('ลบ', 'del', () => askDelete(q.no));
+    tr.title = [q.revNote && 'แก้ไข: ' + q.revNote, cancelled && q.cancelNote && 'ยกเลิก: ' + q.cancelNote].filter(Boolean).join('\n');
+    tr.onclick = () => {
+      if (!confirmDiscard()) return;
+      fillForm(quoteFromRegister(q.no));
+      $('mOpen').classList.remove('show');
+      toast(`เปิด ${q.no} แล้ว`);
+    };
+    tb.appendChild(tr);
+  }
+}
+
+function validate(q) {
+  if (!q.items.length) { toast('ยังไม่มีรายการสินค้า', true); return false; }
+  const bad = q.items.findIndex((i) => !i.desc.trim() && !i.code);
+  if (bad >= 0) { toast(`แถวที่ ${bad + 1} ยังไม่มีรายละเอียดสินค้า`, true); return false; }
+  if (!q.attn && !q.company) { toast('กรุณากรอกชื่อผู้ติดต่อหรือบริษัทลูกค้า', true); return false; }
+  return true;
+}
+
+async function save() {
+  refreshNewQuoteDate();
+  const q = readForm();
+  if (!validate(q)) return false;
+  if (!(await ensureFolder())) return false;
+  if (!q.no) return commitSave(q, 'new');
+  // existing quotation: ask overwrite vs revision
+  try { await loadRegister(); } catch (e) { toast('อ่านไฟล์ทะเบียนไม่ได้: ' + e.message, true); return false; }
+  $('saveNo').textContent = q.no;
+  $('saveRevNo').textContent = fullNo(q.base, nextRev(q.base));
+  $('saveOverNo').textContent = q.no;
+  $('revNote').value = '';
+  document.querySelector('input[name=saveMode][value=rev]').checked = true;
+  $('revNoteWrap').style.display = '';
+  $('mSave').classList.add('show');
+  return new Promise((resolve) => {
+    save._resolve = resolve;
+  });
+}
+
+async function commitSave(q, mode, revNote = '') {
+  try {
+    // always merge into the latest file on disk (it may have been edited in Excel);
+    // a new quotation goes to the year of its date, a revision to the year of its original
+    const year = mode === 'new' ? Number(q.date.slice(0, 4)) : yearOfQuote(q);
+    const reg = await readYearFile(year);
+    let target = { ...q };
+    if (mode === 'new') {
+      target.base = nextBaseNumber(q.date, reg); target.rev = 0; target.no = target.base; target.revNote = '';
+      target.status = ''; target.cancelNote = '';
+    } else if (mode === 'rev') {
+      target.rev = nextRev(q.base, reg); target.no = fullNo(q.base, target.rev); target.revNote = revNote;
+      target.status = ''; target.cancelNote = '';
+    }
+    target.saved = nowStamp();
+    const rec = { ...target }; delete rec.items;
+    reg.quotes = reg.quotes.filter((x) => x.no !== target.no).concat(rec);
+    reg.items = reg.items.filter((i) => i.no !== target.no)
+      .concat(target.items.map((i, k) => ({ no: target.no, seq: k + 1, ...i })));
+    await writeYearFile(year, reg);
+    regs.set(year, reg); rebuildRegister();
+    refreshDatalists(); setFolderStatus();
+    fillForm(target);
+    toast(`บันทึกแล้ว: ${target.no}`);
+    return true;
+  } catch (e) {
+    writeError(e);
+    return false;
+  }
+}
+
+function writeError(e) {
+  console.error(e);
+  const locked = ['NoModificationAllowedError', 'InvalidModificationError', 'InvalidStateError'].includes(e.name);
+  toast(locked
+    ? `บันทึกไม่ได้ — ไฟล์ทะเบียนใน ${REG_DIR}/ อาจเปิดอยู่ใน Excel กรุณาปิดไฟล์แล้วลองอีกครั้ง`
+    : `บันทึกไม่ได้: ${e.message}`, true, 7000);
+}
+
+// read the latest register of `year` from disk, apply `change`, write it back
+async function mutateRegister(year, change, backupLabel = '') {
+  try {
+    const reg = await readYearFile(year);
+    change(reg);
+    if (backupLabel) await backupYearFile(year, backupLabel);
+    await writeYearFile(year, reg);
+    regs.set(year, reg); rebuildRegister();
+    refreshDatalists(); setFolderStatus();
+    return true;
+  } catch (e) {
+    writeError(e);
+    return false;
+  }
+}
+
+// ===================== cancel / delete =====================
+async function setCancelled(no, cancel) {
+  let note = '';
+  if (cancel) {
+    note = prompt(`ยกเลิกใบ ${no}\nเลขที่นี้จะไม่ถูกใช้ซ้ำ และใบยังอยู่ในทะเบียน\n\nเหตุผล (ไม่บังคับ):`, '');
+    if (note === null) return;
+  } else if (!confirm(`คืนสถานะใบ ${no} ให้ใช้งานได้ตามปกติ?`)) return;
+  const ok = await mutateRegister(yearOfKnownNo(no), (reg) => {
+    const q = reg.quotes.find((x) => x.no === no);
+    if (!q) throw new Error(`ไม่พบ ${no} ในทะเบียน`);
+    q.status = cancel ? CANCELLED : ''; q.cancelNote = cancel ? note.trim() : ''; q.saved = nowStamp();
+  });
+  if (!ok) return;
+  if (current.no === no) { current.status = cancel ? CANCELLED : ''; current.cancelNote = cancel ? note.trim() : ''; showStatus(); }
+  renderOpenList();
+  toast(cancel ? `ยกเลิกใบ ${no} แล้ว` : `คืนสถานะใบ ${no} แล้ว`);
+}
+
+let pendingDelete = null;
+function askDelete(no) {
+  const q = register.quotes.find((x) => x.no === no);
+  const family = register.quotes.filter((x) => x.base === q.base).map((x) => x.no).sort();
+  pendingDelete = { no, family };
+  $('delNo').textContent = no;
+  $('delOne').textContent = `ลบเฉพาะ ${no}`;
+  $('delAll').textContent = `ลบทั้งชุด (${family.length} ฉบับ: ${family.join(', ')})`;
+  $('delAll').style.display = family.length > 1 ? '' : 'none';
+  $('mDelete').classList.add('show');
+}
+
+async function deleteQuotes(nos) {
+  $('mDelete').classList.remove('show');
+  const set = new Set(nos);
+  const years = new Set(nos.map(yearOfKnownNo).filter((y) => y != null));
+  for (const y of years) {
+    const ok = await mutateRegister(y, (reg) => {
+      reg.quotes = reg.quotes.filter((q) => !set.has(q.no));
+      reg.items = reg.items.filter((i) => !set.has(i.no));
+    }, 'ก่อนลบ');
+    if (!ok) return;
+  }
+  if (!years.size) return;
+  if (set.has(current.no)) { fillForm(blankQuote()); }
+  renderOpenList();
+  toast(`ลบ ${nos.join(', ')} แล้ว (สำรองไฟล์ก่อนลบไว้ใน backup/)`, false, 5000);
+}
+
+async function printDoc() {
+  if (dirty || !current.no) {
+    if (confirm('ต้องบันทึกก่อนพิมพ์ เพื่อให้ได้เลขที่เอกสาร\nบันทึกตอนนี้เลยหรือไม่?')) {
+      if (!(await save())) return;
+    } else if (!confirm('พิมพ์โดยไม่บันทึก?')) return;
+  }
+  // the browser cannot choose where "Save as PDF" goes, so prepare pdf/YYYY/MM/ and say where to save
+  const pdfPath = await preparePdfFolder(current.date || todayISO());
+  const old = document.title;
+  if (current.no) document.title = current.no;   // default PDF file name
+  window.print();
+  document.title = old;
+  if (pdfPath) toast(`เก็บไฟล์ PDF ไว้ที่ ${pdfPath}`, false, 8000);
+}
+
+async function preparePdfFolder(iso) {
+  if (!dirHandle) return '';
+  const [y, m] = iso.split('-');
+  try {
+    const yd = await (await dirHandle.getDirectoryHandle(PDF_DIR, { create: true })).getDirectoryHandle(y, { create: true });
+    await yd.getDirectoryHandle(m, { create: true });
+    return `${dirHandle.name}/${PDF_DIR}/${y}/${m}/`;
+  } catch { return ''; }
+}
+
+// "หน้า 1/2" only when the quotation runs over one A4 page (269mm of content inside the page margins)
+const PRINT_AREA_MM = 297 - 2 * 14;
+function updatePageNumbers() {
+  const px = document.querySelector('table.doc').offsetHeight - $('btnAddRow').offsetHeight;
+  $('pageNumbers').disabled = px * 25.4 / 96 <= PRINT_AREA_MM;
+}
+window.addEventListener('beforeprint', () => { syncPrintHeader(); updatePageNumbers(); });
+
+// ===================== program version / update / roll back =====================
+// An update replaces only program files (quotation.html, lib/*.js) in the connected folder;
+// the previous quotation.html is kept in backup/โปรแกรม/ so it can be restored.
+const APP_VERSION = '1.2.0';
+const UPDATE_BASE = 'https://raw.githubusercontent.com/SarujTan/siamphan-quotation/main/';
+const PROG_BACKUP_DIR = 'โปรแกรม';
+const UPDATABLE = /^(quotation\.html|lib\/[\w.-]+\.js)$/;   // an update may never touch data files
+
+function cmpVersion(a, b) {
+  const pa = String(a).split('.').map(Number), pb = String(b).split('.').map(Number);
+  for (let k = 0; k < 3; k++) { const d = (pa[k] || 0) - (pb[k] || 0); if (d) return Math.sign(d); }
+  return 0;
+}
+const versionOf = (html) => String(html).match(/const APP_VERSION = '([\d.]+)'/)?.[1] ?? null;
+
+async function sha256Hex(bytes) {
+  const h = await crypto.subtle.digest('SHA-256', bytes);
+  return [...new Uint8Array(h)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+let updateInfo = null;   // version.json from GitHub when it offers a newer version
+
+async function checkOnline() {
+  try {
+    const r = await fetch(`${UPDATE_BASE}version.json?t=${Date.now()}`, { cache: 'no-store' });
+    if (!r.ok) return null;
+    const info = await r.json();
+    updateInfo = cmpVersion(info.version, APP_VERSION) > 0 ? info : null;
+    showVersionButton();
+    return info;
+  } catch { return null; }   // offline or not published yet: keep working as is
+}
+
+function showVersionButton() {
+  const b = $('btnVersion');
+  b.textContent = updateInfo ? `มีอัปเดต v${updateInfo.version}` : `v${APP_VERSION}`;
+  b.classList.toggle('has-update', !!updateInfo);
+}
+
+// the program folder: the connected folder must hold quotation.html
+async function programFolder() {
+  // no permission prompt here: by the time a download finishes the click no longer counts as a user action
+  if (!dirHandle || (await dirHandle.queryPermission({ mode: 'readwrite' })) !== 'granted') {
+    toast('กด "เชื่อมต่อ folder" ก่อน แล้วค่อยอัปเดต', true, 6000);
+    return null;
+  }
+  try { await dirHandle.getFileHandle('quotation.html'); } catch {
+    toast(`folder "${dirHandle.name}" ไม่มีไฟล์ quotation.html — เชื่อมต่อ folder ของโปรแกรมก่อนอัปเดต`, true, 7000);
+    return null;
+  }
+  const here = decodeURIComponent(location.pathname).replace(/\\/g, '/');
+  if (!here.endsWith(`/${dirHandle.name}/quotation.html`) &&
+    !confirm(`ไฟล์โปรแกรมที่เปิดอยู่ไม่ได้อยู่ใน folder "${dirHandle.name}"\nการอัปเดตจะเปลี่ยนไฟล์ใน "${dirHandle.name}" เท่านั้น\n\nทำต่อหรือไม่?`)) return null;
+  return dirHandle;
+}
+
+async function filePath(root, path, create) {
+  const parts = path.split('/');
+  let dir = root;
+  for (const p of parts.slice(0, -1)) dir = await dir.getDirectoryHandle(p, { create });
+  return { dir, name: parts[parts.length - 1] };
+}
+
+function stampNow() { const d = new Date(); return `${todayISO()}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`; }
+
+// files: [{path, bytes}]; quotation.html must be among them
+async function installProgram(files, version, root = null) {
+  root ??= await programFolder();
+  if (!root) return false;
+  for (const f of files) if (!UPDATABLE.test(f.path)) throw new Error(`ไฟล์ ${f.path} ไม่ใช่ไฟล์โปรแกรม`);
+  const html = files.find((f) => f.path === 'quotation.html');
+  if (!html || versionOf(new TextDecoder().decode(html.bytes)) !== version) throw new Error('ไฟล์ quotation.html ไม่ถูกต้อง');
+  if (dirty && !confirm('มีข้อมูลที่ยังไม่ได้บันทึก จะหายเมื่อโหลดโปรแกรมใหม่\nทำต่อหรือไม่?')) return false;
+  // keep the files being replaced
+  const bdir = await (await root.getDirectoryHandle(BACKUP_DIR, { create: true })).getDirectoryHandle(PROG_BACKUP_DIR, { create: true });
+  const stamp = stampNow();
+  for (const f of files) {
+    try {
+      const { dir, name } = await filePath(root, f.path, false);
+      const old = await (await (await dir.getFileHandle(name)).getFile()).arrayBuffer();
+      const dot = name.lastIndexOf('.');
+      const v = (f.path === 'quotation.html' && versionOf(new TextDecoder().decode(old))) || APP_VERSION;
+      await writeBytes(bdir, `${name.slice(0, dot)}_v${v}_${stamp}${name.slice(dot)}`, old);
+    } catch (e) { if (e.name !== 'NotFoundError') throw e; }
+  }
+  for (const f of files.filter((x) => x.path !== 'quotation.html')) {
+    const { dir, name } = await filePath(root, f.path, true);
+    await writeBytes(dir, name, f.bytes);
+  }
+  await writeBytes(root, 'quotation.html', html.bytes);   // last, so a failed download never leaves a half update
+  dirty = false;
+  alert(`ติดตั้งเวอร์ชัน ${version} แล้ว — โปรแกรมจะโหลดใหม่`);
+  reloadApp();
+  return true;
+}
+
+function reloadApp() { location.reload(); }
+
+async function updateOnline() {
+  const info = updateInfo;
+  const root = await programFolder();
+  if (!root) return;
+  try {
+    const files = [];
+    for (const f of info.files) {
+      if (!UPDATABLE.test(f.path)) throw new Error(`ไฟล์ ${f.path} ไม่ใช่ไฟล์โปรแกรม`);
+      const r = await fetch(`${UPDATE_BASE}${f.path}?v=${info.version}`, { cache: 'no-store' });
+      if (!r.ok) throw new Error(`ดาวน์โหลด ${f.path} ไม่ได้ (${r.status})`);
+      const bytes = new Uint8Array(await r.arrayBuffer());
+      if (f.sha256 && (await sha256Hex(bytes)) !== f.sha256) throw new Error(`ไฟล์ ${f.path} ไม่ครบ ลองใหม่อีกครั้งในอีกสักครู่`);
+      files.push({ path: f.path, bytes });
+    }
+    await installProgram(files, info.version, root);
+  } catch (e) { toast('อัปเดตไม่สำเร็จ: ' + e.message, true, 8000); }
+}
+
+async function updateFromFile(file) {
+  try {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const v = versionOf(new TextDecoder().decode(bytes));
+    if (!v) throw new Error(`ไฟล์ "${file.name}" ไม่ใช่โปรแกรมใบเสนอราคา`);
+    const c = cmpVersion(v, APP_VERSION);
+    const msg = c > 0 ? `ติดตั้งเวอร์ชัน ${v} (ตอนนี้ใช้ ${APP_VERSION})?`
+      : c === 0 ? `ไฟล์นี้เป็นเวอร์ชัน ${v} เท่ากับที่ใช้อยู่ ติดตั้งซ้ำหรือไม่?`
+      : `ไฟล์นี้เป็นเวอร์ชัน ${v} ซึ่งเก่ากว่าที่ใช้อยู่ (${APP_VERSION})\nติดตั้งเวอร์ชันเก่ากว่าหรือไม่?`;
+    if (!confirm(msg)) return;
+    await installProgram([{ path: 'quotation.html', bytes }], v);
+  } catch (e) { toast('อัปเดตไม่สำเร็จ: ' + e.message, true, 8000); }
+}
+
+// backup/โปรแกรม/quotation_v1.2.0_2026-11-19_101500.html
+async function programBackups() {
+  if (!dirHandle) return [];
+  const out = [];
+  try {
+    const bdir = await (await dirHandle.getDirectoryHandle(BACKUP_DIR)).getDirectoryHandle(PROG_BACKUP_DIR);
+    for await (const h of bdir.values()) {
+      const m = h.kind === 'file' && h.name.match(/^quotation_v([\d.]+)_(\d{4}-\d{2}-\d{2})_((\d{2})(\d{2})\d{2})\.html$/);
+      if (m) out.push({ version: m[1], at: `${m[2]}_${m[3]}`, when: `${shortDate(m[2])} ${m[4]}:${m[5]}`, handle: h });
+    }
+  } catch { /* nothing backed up yet */ }
+  return out.sort((a, b) => b.at.localeCompare(a.at));   // newest first
+}
+
+async function rollback(b) {
+  if (!confirm(`ย้อนกลับไปใช้เวอร์ชัน ${b.version} (สำรองไว้เมื่อ ${b.when})?\nเวอร์ชันที่ใช้อยู่ตอนนี้ (${APP_VERSION}) จะถูกเก็บไว้ใน backup เช่นกัน`)) return;
+  try {
+    const bytes = new Uint8Array(await (await b.handle.getFile()).arrayBuffer());
+    await installProgram([{ path: 'quotation.html', bytes }], versionOf(new TextDecoder().decode(bytes)));
+  } catch (e) { toast('ย้อนกลับไม่สำเร็จ: ' + e.message, true, 8000); }
+}
+
+async function openVersionDialog() {
+  $('verCurrent').textContent = APP_VERSION;
+  const box = $('verOnline');
+  box.className = 'ver-box'; box.textContent = 'กำลังตรวจสอบเวอร์ชันล่าสุด...';
+  $('verBackups').innerHTML = '';
+  $('mVersion').classList.add('show');
+  const info = await checkOnline();
+  box.innerHTML = '';
+  if (!info) box.textContent = 'ตรวจสอบเวอร์ชันล่าสุดไม่ได้ (ไม่มีอินเทอร์เน็ต?) — ยังใช้งานได้ตามปกติ';
+  else if (!updateInfo) box.textContent = `ใช้เวอร์ชันล่าสุดแล้ว (${info.version})`;
+  else {
+    box.classList.add('new');
+    const h = document.createElement('b'); h.textContent = `มีเวอร์ชันใหม่ ${info.version}${info.date ? ' (' + info.date + ')' : ''}`;
+    const n = document.createElement('div'); n.className = 'notes-text'; n.textContent = info.notes || '';
+    const b = document.createElement('button'); b.className = 'primary'; b.textContent = 'อัปเดตเลย';
+    b.onclick = async () => { b.disabled = true; b.textContent = 'กำลังอัปเดต...'; await updateOnline(); b.disabled = false; b.textContent = 'อัปเดตเลย'; };
+    box.append(h, n, b);
+  }
+  const list = await programBackups();
+  const tb = $('verBackups');
+  if (!list.length) { tb.innerHTML = '<tr><td class="empty" style="padding:10px">ยังไม่มี</td></tr>'; return; }
+  for (const b of list) {
+    const tr = document.createElement('tr');
+    const t = document.createElement('td'); t.textContent = `เวอร์ชัน ${b.version} · สำรองเมื่อ ${b.when}`;
+    const a = document.createElement('td'); a.className = 'acts';
+    const btn = document.createElement('button'); btn.className = 'act restore'; btn.textContent = 'ย้อนกลับไปใช้';
+    btn.onclick = () => rollback(b);
+    a.appendChild(btn); tr.append(t, a); tb.appendChild(tr);
+  }
+}
+
+// ===================== events =====================
+$('btnNew').onclick = newQuote;
+$('btnOpen').onclick = openDialog;
+$('btnCopy').onclick = copyAsNew;
+$('btnSave').onclick = () => save();
+$('btnPrint').onclick = printDoc;
+$('btnFolder').onclick = () => connectFolder(!!dirHandle);
+$('btnAddRow').onclick = () => { addRow().querySelector('[data-k=code]').focus(); setDirty(true); };
+$('openSearch').oninput = renderOpenList;
+$('delOne').onclick = () => deleteQuotes([pendingDelete.no]);
+$('delAll').onclick = () => deleteQuotes(pendingDelete.family);
+$('btnVersion').onclick = openVersionDialog;
+$('btnUpdateFile').onclick = () => $('updFile').click();
+$('updFile').onchange = (e) => { const f = e.target.files[0]; e.target.value = ''; if (f) updateFromFile(f); };
+
+document.querySelectorAll('[data-close]').forEach((b) => b.onclick = () => {
+  b.closest('.modal-bg').classList.remove('show');
+  if (save._resolve) { save._resolve(false); save._resolve = null; }
+});
+document.querySelectorAll('input[name=saveMode]').forEach((r) => r.onchange = () => {
+  $('revNoteWrap').style.display = r.value === 'rev' && r.checked ? '' : 'none';
+});
+$('btnSaveConfirm').onclick = async () => {
+  const mode = document.querySelector('input[name=saveMode]:checked').value;
+  $('mSave').classList.remove('show');
+  const ok = await commitSave(readForm(), mode, $('revNote').value.trim());
+  if (save._resolve) { save._resolve(ok); save._resolve = null; }
+};
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') document.querySelectorAll('.modal-bg.show [data-close]').forEach((b) => b.click());
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); save(); }
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'p') { e.preventDefault(); printDoc(); }
+});
+
+$('fDate').onchange = () => { dateTouched = true; $('fDateText').textContent = thaiDate($('fDate').value); setDirty(true); };
+
+// a new quotation left open overnight should still get today's date (unless the date was set by hand)
+function refreshNewQuoteDate() {
+  if (current.no || dateTouched || $('fDate').value === todayISO()) return;
+  $('fDate').value = todayISO();
+  $('fDateText').textContent = thaiDate(todayISO());
+}
+document.querySelector('.date-wrap').onclick = () => { try { $('fDate').showPicker(); } catch {} };
+['fAttn', 'fCompany', 'fIntro', 'fNote1', 'fConfirm', 'fCredit'].forEach((id) => $(id).addEventListener('input', () => setDirty(true)));
+
+// known contact -> fill their company (and the reverse) plus credit/confirm days.
+// master data wins over history; the other name field is only filled when empty,
+// the days only while they have not been edited by hand
+function customerInfo(field, value) {
+  const k = nameKey(value);
+  if (!k) return null;
+  const m = master.customers.find((c) => nameKey(c[field]) === k);
+  if (m) return m;
+  return latestQuoteBy(field, value);
+}
+function applyCustomer(field) {
+  const info = customerInfo(field, $(field === 'attn' ? 'fAttn' : 'fCompany').value);
+  if (!info) return;
+  const other = field === 'attn' ? ['fCompany', 'company'] : ['fAttn', 'attn'];
+  if (!$(other[0]).value.trim() && info[other[1]]) $(other[0]).value = info[other[1]];
+  syncPrintHeader();
+  if (!termsTouched) {
+    if (info.creditDays) setPayTerm(info.creditDays);
+    if (info.confirmDays) $('fConfirm').value = info.confirmDays;
+  }
+  setDirty(true);
+}
+$('fAttn').addEventListener('change', () => applyCustomer('attn'));
+$('fCompany').addEventListener('change', () => applyCustomer('company'));
+['fAttn', 'fCompany'].forEach((id) => $(id).addEventListener('input', syncPrintHeader));
+['fConfirm', 'fCredit'].forEach((id) => $(id).addEventListener('input', () => { termsTouched = true; }));
+$('fPay').addEventListener('change', () => { termsTouched = true; showPayTerm(); setDirty(true); });
+$('payCaret').onclick = () => { try { $('fPay').showPicker(); } catch { $('fPay').focus(); } };
+// pick up edits made to the master file in Excel when coming back to this window
+window.addEventListener('focus', () => { refreshNewQuoteDate(); if (dirHandle) loadMaster(true); });
+
+suggest.box = $('suggest');
+const body = $('itemsBody');
+body.addEventListener('input', (e) => {
+  const el = e.target;
+  // a code wraps inside its cell but stays one line (pasted line breaks become spaces)
+  if (el.dataset.k === 'code' && /[\r\n]/.test(el.value)) el.value = el.value.replace(/\s*[\r\n]+\s*/g, ' ');
+  if (el.tagName === 'TEXTAREA') autoGrow(el);
+  if (el.dataset.k === 'code') fitCodeColumn();
+  if (el.dataset.k === 'code' || el.dataset.k === 'desc') showSuggest(el);
+  setDirty(true);
+  recalc();
+});
+body.addEventListener('focusout', (e) => { if (e.target === suggest.input) hideSuggest(); });
+window.addEventListener('resize', hideSuggest);
+body.addEventListener('change', (e) => {
+  // known product code: fill description/price if still empty
+  if (e.target.dataset.k !== 'code') return;
+  const p = productIndex().get(e.target.value.trim());
+  if (!p) return;
+  const tr = e.target.closest('tr');
+  const d = tr.querySelector('[data-k=desc]'), pr = tr.querySelector('[data-k=price]');
+  if (!d.value.trim()) { d.value = p.desc; autoGrow(d); fitCodeColumn(); }
+  if (!pr.value.trim() && defaultPrice(p) != null) pr.value = money(defaultPrice(p));
+  recalc();
+});
+body.addEventListener('focusin', (e) => {
+  if (e.target.dataset.k === 'price') { const n = toNum(e.target.value); e.target.value = n == null ? '' : String(n); }
+});
+body.addEventListener('focusout', (e) => {
+  if (e.target.dataset.k === 'price') { const n = toNum(e.target.value); e.target.value = n == null ? e.target.value : money(n); }
+});
+body.addEventListener('click', (e) => {
+  if (!e.target.classList.contains('row-del')) return;
+  const tr = e.target.closest('tr');
+  const item = readRows()[tr.rowIndex - 1];
+  if (!isEmptyItem(item) && !confirm('ลบแถวนี้?')) return;
+  tr.remove();
+  while (body.rows.length < MIN_ROWS) addRow();
+  fitCodeColumn();
+  setDirty(true); recalc();
+});
+// Enter moves to the same column on the next row (adds a row at the end)
+body.addEventListener('keydown', (e) => {
+  if (suggest.input === e.target && suggest.list.length) {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); moveSuggest(e.key === 'ArrowDown' ? 1 : -1); return; }
+    if (e.key === 'Escape') { e.stopPropagation(); hideSuggest(); return; }
+    if (e.key === 'Enter' && suggest.idx >= 0) { e.preventDefault(); pickSuggest(suggest.idx); return; }
+    if (e.key === 'Enter' || e.key === 'Tab') hideSuggest();
+  }
+  if (e.key !== 'Enter' || e.isComposing) return;
+  const k = e.target.dataset.k; if (!k) return;
+  if (e.shiftKey) { if (k === 'code') e.preventDefault(); return; }
+  e.preventDefault();
+  const tr = e.target.closest('tr');
+  const next = tr.nextElementSibling || addRow();
+  next.querySelector(`[data-k=${k}]`).focus();
+});
+
+window.addEventListener('beforeunload', (e) => { if (dirty) { e.preventDefault(); e.returnValue = ''; } });
+
+// ===================== start =====================
+showVersionButton();
+fillForm(blankQuote());
+restoreFolder();
+checkOnline();
+</script>
+</body>
+</html>
